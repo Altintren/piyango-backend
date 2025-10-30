@@ -1,7 +1,7 @@
 import express from "express";
 import mongoose from "mongoose";
 import axios from "axios";
-import cheerio from "cheerio";
+import * as cheerio from "cheerio";
 import dotenv from "dotenv";
 import cors from "cors";
 
