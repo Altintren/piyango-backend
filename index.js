@@ -1,201 +1,199 @@
-// functions/index.js
-require('dotenv').config();
-const express = require('express');
-const mongoose = require('mongoose');
-const axios = require('axios');
-const cheerio = require('cheerio');
-const cors = require('cors');
+import express from "express";
+import mongoose from "mongoose";
+import axios from "axios";
+import cheerio from "cheerio";
+import dotenv from "dotenv";
+import cors from "cors";
 
+dotenv.config();
 const app = express();
 app.use(cors());
-app.use(express.json());
 
-// ---------- Config ----------
 const PORT = process.env.PORT || 10000;
-const MONGO_URI = process.env.MONGO_URI;
+const mongoURI = process.env.MONGO_URI;
 
-if (!MONGO_URI) {
-  console.error('❌ MONGO_URI environment variable is missing.');
-}
-
-const BASE_URL = 'https://www.fotomac.com.tr/sayisal-loto-sonuclari/';
-const AXIOS_DEFAULTS = {
-  headers: {
-    'User-Agent': 'Mozilla/5.0 (compatible; PiyangoBot/1.0; +https://example.com)',
-    Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
-  },
-  timeout: 15000,
-};
-
-// ---------- Mongo setup ----------
-mongoose
-  .connect(MONGO_URI, { dbName: 'lotodb' })
-  .then(() => console.log('✅ MongoDB bağlantısı başarılı'))
-  .catch((err) => console.error('❌ MongoDB bağlantı hatası:', err));
-
+// =========================
+// MongoDB Model
+// =========================
 const resultSchema = new mongoose.Schema({
-  week: { type: Number, required: true, unique: true },
+  week: Number,
   numbers: [String],
-  joker: { type: String, default: null },
-  superstar: { type: String, default: null },
+  joker: String,
+  superstar: String,
   dateFetched: { type: Date, default: Date.now },
 });
 
-const Result = mongoose.model('Result', resultSchema);
+const Result = mongoose.model("Result", resultSchema);
 
-// ---------- Helper Functions ----------
+// =========================
+// MongoDB Connection
+// =========================
+mongoose
+  .connect(mongoURI, { dbName: "lotodb" })
+  .then(() => console.log("✅ MongoDB bağlantısı başarılı"))
+  .catch((err) => console.error("❌ MongoDB bağlantı hatası:", err));
 
-// HTML sayfasından sayıları çek
-function parseNumbersFromPage($) {
-  const selectors = [
-    '.lottery-wins-numbers span',
-    '.superloto-results__numbers .number',
-    '.results__numbers .number',
-    '.result-numbers span',
-    '.numbers-list span'
-  ];
+// =========================
+// Helper: Fotomaç'tan Linkleri Çek
+// =========================
+async function getAllDrawLinks() {
+  const basePage = "https://www.fotomac.com.tr/sayisal-loto-sonuclari";
+  const { data } = await axios.get(basePage);
+  const $ = cheerio.load(data);
 
-  for (const sel of selectors) {
-    const numbers = $(sel).map((i, el) => $(el).text().trim()).get();
-    if (numbers.length >= 6) return numbers;
-  }
+  let links = [];
 
-  // fallback (metindeki tüm sayıları topla)
-  const text = $('body').text();
-  const matches = text.match(/\b\d{1,2}\b/g);
-  return matches ? matches.slice(0, 8) : [];
-}
-
-// Haftaların toplam sayısını otomatik bul
-async function detectTotalWeeks() {
-  console.log('🔎 Hafta sayısı tespit ediliyor...');
-  let week = 1;
-  let lastGood = 0;
-  let consecutive404 = 0;
-  const MAX_PROBES = 1000;
-
-  while (consecutive404 < 3 && week <= MAX_PROBES) {
-    try {
-      const url = `${BASE_URL}${week}`;
-      const resp = await axios.get(url, AXIOS_DEFAULTS);
-      if (resp.status === 200) {
-        lastGood = week;
-        consecutive404 = 0;
-      } else {
-        consecutive404++;
+  $("a").each((i, el) => {
+    const href = $(el).attr("href");
+    if (href && href.includes("/sayisal-loto-sonuclari/")) {
+      const match = href.match(/sayisal-loto-sonuclari\/(\d+)/);
+      if (match) {
+        links.push({
+          id: parseInt(match[1]),
+          url: `https://www.fotomac.com.tr${href}`,
+        });
       }
-    } catch (err) {
-      if (err.response && err.response.status === 404) consecutive404++;
-      else console.warn(`⚠️ ${BASE_URL}${week} hata: ${err.message}`);
     }
+  });
 
-    week++;
-    await new Promise((r) => setTimeout(r, 150));
-  }
+  // Tekrar edenleri kaldır ve ID'ye göre sırala
+  links = [
+    ...new Map(links.map((item) => [item.id, item])).values(),
+  ].sort((a, b) => a.id - b.id);
 
-  console.log(`📅 Toplam ${lastGood} hafta bulundu.`);
-  return lastGood;
+  console.log(`🔗 ${links.length} çekiliş linki bulundu.`);
+  return links;
 }
 
-// ---------- API: Sonuçları Güncelle ----------
-app.get('/api/update-results', async (req, res) => {
-  console.log('🧭 Manuel güncelleme isteği alındı...');
+// =========================
+// Helper: Bir Sayfadan Verileri Çek
+// =========================
+async function scrapeDrawPage(url) {
   try {
-    const totalWeeks = await detectTotalWeeks();
-    const lastResult = await Result.findOne().sort({ week: -1 });
-    const startWeek = lastResult ? lastResult.week + 1 : 1;
-    console.log(`🔁 ${startWeek}. haftadan itibaren güncellenecek...`);
+    const { data } = await axios.get(url);
+    const $ = cheerio.load(data);
+    const nums = [];
 
-    const addedWeeks = [];
+    $(".lotonumbers .number").each((i, el) => {
+      nums.push($(el).text().trim());
+    });
 
-    for (let week = startWeek; week <= totalWeeks; week++) {
-      const url = `${BASE_URL}${week}`;
-      console.log(`📡 ${url}`);
+    if (nums.length === 0) return null;
 
-      try {
-        const { data } = await axios.get(url, AXIOS_DEFAULTS);
-        const $ = cheerio.load(data);
-        const numbers = parseNumbersFromPage($);
+    // 6 - 7 - 8 sayı durumunu yönet
+    const result = {
+      numbers: nums.slice(0, 6),
+      joker: nums[6] || null,
+      superstar: nums[7] || null,
+    };
 
-        if (numbers.length < 6) {
-          console.warn(`⚠️ ${week}. hafta yetersiz veri (${numbers.length})`);
-          continue;
-        }
+    return result;
+  } catch (err) {
+    console.log(`⚠️ ${url} hata: ${err.message}`);
+    return null;
+  }
+}
 
-        let main = numbers.slice(0, 6);
-        let joker = null;
-        let superstar = null;
+// =========================
+// API: Manuel Veri Güncelleme (Hibrit Versiyon)
+// =========================
+app.get("/api/update-results", async (req, res) => {
+  console.log("🧭 Manuel güncelleme isteği alındı...");
 
-        if (numbers.length === 7) joker = numbers[6];
-        if (numbers.length >= 8) {
-          joker = numbers[6];
-          superstar = numbers[7];
-        }
+  try {
+    console.log("🚀 Veri güncelleme başlatıldı...");
 
-        const doc = new Result({
-          week,
-          numbers: main,
-          joker,
-          superstar,
-          dateFetched: new Date()
+    const links = await getAllDrawLinks();
+    if (!links.length) throw new Error("Hiç çekiliş linki bulunamadı.");
+
+    // Mevcut son haftayı bul
+    const last = await Result.findOne().sort({ week: -1 });
+    const lastWeek = last ? last.week : 0;
+
+    // Yeni linkleri filtrele
+    const newLinks = links.filter((_, i) => i + 1 > lastWeek);
+
+    console.log(
+      `🔁 ${lastWeek + 1}. haftadan itibaren ${newLinks.length} yeni çekiliş işlenecek...`
+    );
+
+    let addedCount = 0;
+    for (let i = 0; i < newLinks.length; i++) {
+      const link = newLinks[i];
+      const drawData = await scrapeDrawPage(link.url);
+
+      if (drawData) {
+        const result = new Result({
+          week: lastWeek + 1 + i,
+          numbers: drawData.numbers,
+          joker: drawData.joker,
+          superstar: drawData.superstar,
         });
 
-        await doc.save();
-        console.log(`✅ ${week}. hafta kaydedildi: ${main.join(', ')}${joker ? ` + Joker ${joker}` : ''}${superstar ? ` + SüperStar ${superstar}` : ''}`);
-        addedWeeks.push(week);
-
-      } catch (err) {
-        if (err.code === 11000) {
-          console.log(`ℹ️ ${week}. hafta zaten kayıtlı`);
-        } else if (err.response && err.response.status === 404) {
-          console.warn(`⚠️ ${week}. hafta bulunamadı (404)`);
-        } else {
-          console.error(`❌ ${week}. hafta hata: ${err.message}`);
-        }
+        await result.save();
+        addedCount++;
+        console.log(
+          `📥 ${result.week}. hafta (${drawData.numbers.length} sayı) kaydedildi.`
+        );
       }
-
-      await new Promise((r) => setTimeout(r, 200)); // siteye nazik davran
     }
 
-    console.log(`🎯 Güncelleme tamamlandı. ${addedWeeks.length} yeni kayıt eklendi.`);
-    res.json({ message: 'Güncelleme tamamlandı', addedWeeks });
-
+    console.log(`🎯 Güncelleme tamamlandı. ${addedCount} yeni kayıt eklendi.`);
+    res.json({ message: "Güncelleme tamamlandı", addedCount });
   } catch (err) {
-    console.error('❌ Güncelleme hatası:', err.message);
+    console.error("❌ Güncelleme hatası:", err);
     res.status(500).json({ error: err.message });
   }
 });
 
-// ---------- API: Tahminler ----------
-app.get('/api/predictions', async (req, res) => {
+// =========================
+// API: Tahmin Hesaplama
+// =========================
+app.get("/api/predictions", async (req, res) => {
   try {
     const results = await Result.find();
-    const numbersFreq = {}, jokerFreq = {}, superstarFreq = {};
 
-    for (const r of results) {
-      for (const n of r.numbers) numbersFreq[n] = (numbersFreq[n] || 0) + 1;
-      if (r.joker) jokerFreq[r.joker] = (jokerFreq[r.joker] || 0) + 1;
-      if (r.superstar) superstarFreq[r.superstar] = (superstarFreq[r.superstar] || 0) + 1;
-    }
+    const count = (arr) =>
+      arr.reduce((acc, n) => {
+        acc[n] = (acc[n] || 0) + 1;
+        return acc;
+      }, {});
 
-    const topNumbers = Object.entries(numbersFreq).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([n]) => n);
-    const topJokers = Object.entries(jokerFreq).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([n]) => n);
-    const topSuperstars = Object.entries(superstarFreq).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([n]) => n);
+    const allNumbers = results.flatMap((r) => r.numbers || []);
+    const allJokers = results.map((r) => r.joker).filter(Boolean);
+    const allSuperstars = results.map((r) => r.superstar).filter(Boolean);
 
-    const predictions = Array.from({ length: 3 }).map((_, i) => ({
-      numbers: topNumbers.slice(i * 2, i * 2 + 6),
-      joker: topJokers[i % topJokers.length] || null,
-      superstar: topSuperstars[i % topSuperstars.length] || null
-    }));
+    const topNumbers = Object.entries(count(allNumbers))
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 10)
+      .map(([n]) => n);
+
+    const topJokers = Object.entries(count(allJokers))
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3)
+      .map(([n]) => n);
+
+    const topSuperstars = Object.entries(count(allSuperstars))
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3)
+      .map(([n]) => n);
+
+    const predictions = Array.from({ length: 3 }, () => [
+      ...topNumbers.slice(0, 6),
+      topJokers[0],
+      topSuperstars[0],
+    ]);
 
     res.json({ topNumbers, topJokers, topSuperstars, predictions });
   } catch (err) {
-    console.error('❌ Tahmin hatası:', err.message);
+    console.error("❌ Tahmin hatası:", err);
     res.status(500).json({ error: err.message });
   }
 });
 
-// ---------- Server ----------
-app.listen(PORT, () => {
-  console.log(`🌐 Server running on port ${PORT}`);
-});
+// =========================
+// Server Start
+// =========================
+app.listen(PORT, () =>
+  console.log(`🌐 Server running on port ${PORT}`)
+);
