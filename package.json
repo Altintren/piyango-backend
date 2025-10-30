@@ -3,7 +3,6 @@
   "version": "1.0.0",
   "description": "Piyango backend for Render deployment",
   "main": "index.js",
-  "type": "module",
   "scripts": {
     "start": "node index.js"
   },
@@ -16,7 +15,9 @@
     "cors": "^2.8.5",
     "dotenv": "^16.3.1",
     "express": "^4.19.2",
-    "mongoose": "^8.3.2"
+    "mongoose": "^8.3.2",
+    "node-cron": "^3.0.3"
   }
 }
+
 
