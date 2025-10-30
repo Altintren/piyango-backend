@@ -1,7 +1,7 @@
 import express from 'express';
 import mongoose from 'mongoose';
 import axios from 'axios';
-import cheerio from 'cheerio';
+import * as cheerio from 'cheerio';
 import dotenv from 'dotenv';
 import cors from 'cors';
 
@@ -131,7 +131,7 @@ app.get('/api/update-results', async (req, res) => {
 });
 
 // =========================
-// API: TAHMİN ÜRET (geçici sade sürüm, Step10B'de geliştirilecek)
+// API: TAHMİN ÜRET (geçici sürüm, Step10B'de gelecek)
 // =========================
 app.get('/api/predictions', async (req, res) => {
   res.json({
