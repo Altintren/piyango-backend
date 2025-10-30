@@ -1,9 +1,9 @@
-import express from "express";
-import mongoose from "mongoose";
-import axios from "axios";
-import * as cheerio from "cheerio";
-import dotenv from "dotenv";
-import cors from "cors";
+const express = require("express");
+const mongoose = require("mongoose");
+const axios = require("axios");
+const cheerio = require("cheerio");
+const dotenv = require("dotenv");
+const cors = require("cors");
 
 dotenv.config();
 const app = express();
@@ -194,6 +194,4 @@ app.get("/api/predictions", async (req, res) => {
 // =========================
 // Server Start
 // =========================
-app.listen(PORT, () =>
-  console.log(`🌐 Server running on port ${PORT}`)
-);
+app.listen(PORT, () => console.log(`🌐 Server running on port ${PORT}`));
