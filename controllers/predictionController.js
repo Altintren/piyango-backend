@@ -6,6 +6,6 @@ export async function handlePredictions(req, res) {
     res.json(data);
   } catch (err) {
     console.error('Tahmin hatası:', err);
-    res.status(500).json({ message: 'Tahmin hesaplama hatası' });
+    res.status(500).json({ message: 'Tahmin hesaplama hatası', error: err.message });
   }
 }
