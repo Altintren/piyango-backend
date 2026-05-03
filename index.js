@@ -13,6 +13,9 @@ app.use(cors());
 const PORT = process.env.PORT || 10000;
 
 async function start() {
+  if (!process.env.MONGODB_URI) {
+    throw new Error('MONGODB_URI environment variable tanımlı değil.');
+  }
   await mongoose.connect(process.env.MONGODB_URI, { dbName: 'lotodb' });
   console.log('MongoDB bağlantısı başarılı');
 
