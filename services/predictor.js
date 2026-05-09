@@ -80,17 +80,27 @@ export async function generateAndSavePrediction() {
     }
 
     if (!found) {
-      // 200 denemede dengeli bulunamazsa, en azından tekrarsız bir kombinasyon al
+      // 200 denemede dengeli bulunamazsa, en azından mevcut çekilişlerden farklı ol
       for (let attempt = 0; attempt < 100; attempt++) {
         const candidate = weightedSample(weights, 6).sort((a, b) => a - b);
         const key = candidate.join(',');
-        if (!usedCombos.has(key)) {
+        if (!existingCombos.has(key) && !usedCombos.has(key)) {
           nums = candidate;
           usedCombos.add(key);
           break;
         }
       }
-      if (!nums) nums = weightedSample(weights, 6).sort((a, b) => a - b);
+      if (!nums) {
+        // Son çare: sadece mevcut çekilişlerden farklı ol
+        for (let attempt = 0; attempt < 200; attempt++) {
+          const candidate = weightedSample(weights, 6).sort((a, b) => a - b);
+          if (!existingCombos.has(candidate.join(','))) {
+            nums = candidate;
+            break;
+          }
+        }
+        if (!nums) nums = weightedSample(weights, 6).sort((a, b) => a - b);
+      }
     }
 
     const joker     = jokerFreq.size > 0 ? weightedPickFrom(jokerFreq) : null;
