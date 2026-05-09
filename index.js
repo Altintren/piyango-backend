@@ -7,15 +7,26 @@ import { startCronJobs } from './jobs/cronJob.js';
 
 dotenv.config();
 
-const app = express();
-app.use(cors());
+process.on('unhandledRejection', reason => {
+  console.error('Unhandled Rejection:', reason);
+});
 
+process.on('uncaughtException', err => {
+  console.error('Uncaught Exception:', err);
+  process.exit(1);
+});
+
+const app  = express();
 const PORT = process.env.PORT || 10000;
+
+app.use(cors());
+app.use(express.json());
 
 async function start() {
   if (!process.env.MONGODB_URI) {
     throw new Error('MONGODB_URI environment variable tanımlı değil.');
   }
+
   await mongoose.connect(process.env.MONGODB_URI, { dbName: 'lotodb' });
   console.log('MongoDB bağlantısı başarılı');
 
@@ -28,6 +39,6 @@ async function start() {
 }
 
 start().catch(err => {
-  console.error('Başlatma hatası:', err);
+  console.error('Başlatma hatası:', err.message);
   process.exit(1);
 });
