@@ -18,7 +18,14 @@ const wrap = fn => async (req, res) => {
   }
 };
 
-router.get('/api/update',      wrap(async () => { const r = await updateResults(); return { success: true, ...r }; }));
+router.get('/api/update', (req, res) => {
+  res.json({ success: true, message: 'Güncelleme arka planda başlatıldı. /api/stats ile takip edebilirsin.' });
+  updateResults().then(r => {
+    console.log(`Güncelleme tamamlandı: ${r.added} yeni, ${r.skipped} atlandı`);
+  }).catch(err => {
+    console.error('Güncelleme hatası:', err.message);
+  });
+});
 router.get('/api/predictions', wrap(getPredictions));
 router.get('/api/performance', wrap(getPerformance));
 router.get('/api/stats',       wrap(getStats));
