@@ -7,6 +7,23 @@ import { generateAndSavePrediction } from '../services/predictor.js';
 
 let isUpdating = false;
 
+export async function checkForNewDraw() {
+  if (isUpdating) return { skipped: true, reason: 'Güncelleme zaten devam ediyor.' };
+
+  const allDraws  = await fetchDrawList();
+  const latestSite = allDraws.reduce((max, d) => d.id > max.id ? d : max, allDraws[0]);
+  const latestDB   = await Result.findOne({}, 'drawId').sort({ drawId: -1 });
+
+  if (latestDB && latestSite.id <= latestDB.drawId) {
+    console.log(`Kontrol: Yeni çekiliş yok (site: ${latestSite.id}, DB: ${latestDB.drawId})`);
+    return { newDraw: false };
+  }
+
+  console.log(`Yeni çekiliş tespit edildi: ${latestSite.id} (${latestSite.date}) — güncelleme başlıyor`);
+  const result = await updateResults();
+  return { newDraw: true, ...result };
+}
+
 export async function updateResults() {
   if (isUpdating) throw new Error('Güncelleme zaten devam ediyor.');
   isUpdating = true;

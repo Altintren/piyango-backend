@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import {
   updateResults,
+  checkForNewDraw,
   getPredictions,
   getPerformance,
   getStats,
@@ -25,6 +26,10 @@ router.get('/api/update', (req, res) => {
   }).catch(err => {
     console.error('Güncelleme hatası:', err.message);
   });
+});
+router.get('/api/check', (req, res) => {
+  res.json({ success: true, message: 'Kontrol başlatıldı.' });
+  checkForNewDraw().catch(err => console.error('Check hatası:', err.message));
 });
 router.get('/api/predictions', wrap(getPredictions));
 router.get('/api/performance', wrap(getPerformance));
