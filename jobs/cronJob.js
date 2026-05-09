@@ -2,10 +2,10 @@ import cron from 'node-cron';
 import { updateResults } from '../controllers/lotteryController.js';
 
 export function startCronJobs() {
+  // Salı 04:00    — Pazartesi çekilişinin ardından
   // Perşembe 04:00 — Çarşamba çekilişinin ardından
-  // Pazar 04:00    — Cumartesi çekilişinin ardından
-  // Pazartesi 04:00 — Yedek kontrol
-  cron.schedule('0 4 * * 0,1,4', async () => {
+  // Pazar 04:00   — Cumartesi çekilişinin ardından
+  cron.schedule('0 4 * * 0,2,4', async () => {
     console.log('Otomatik güncelleme başlatıldı...');
     try {
       const result = await updateResults();
@@ -15,5 +15,5 @@ export function startCronJobs() {
     }
   }, { timezone: 'Europe/Istanbul' });
 
-  console.log('Cron aktif: Pazar + Pazartesi + Perşembe 04:00 (İstanbul)');
+  console.log('Cron aktif: Pazar + Salı + Perşembe 04:00 (İstanbul)');
 }

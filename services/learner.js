@@ -10,10 +10,13 @@ function getDayOfWeek(dateStr) {
   return new Date(year, month - 1, day).getDay();
 }
 
-// Bir sonraki çekiliş günü (Çarşamba=3, Cumartesi=6)
+// Bir sonraki çekiliş günü (Pazartesi=1, Çarşamba=3, Cumartesi=6)
 function getNextDrawDay() {
-  const today = new Date().getDay();
-  return today === 4 ? 6 : 3; // Perşembe → Cumartesi, diğerleri → Çarşamba
+  const day = new Date().getDay();
+  if (day === 0)              return 1; // Pazar     → Pazartesi
+  if (day === 1 || day === 2) return 3; // Pzt/Sal   → Çarşamba
+  if (day >= 3 && day <= 5)  return 6; // Çar/Per/Cum → Cumartesi
+  return 1;                             // Cumartesi → Pazartesi
 }
 
 export async function trainFromScratch() {
@@ -162,12 +165,15 @@ async function createAnalysisLog() {
   const topWeights    = await ModelWeights.find().sort({ score: -1 }).limit(10);
   const topNumbers    = topWeights.map(w => w.number);
 
-  // Süperstar frekansı
+  // Joker ve süperstar frekansları
+  const jokerFreq = new Map();
   const superFreq = new Map();
-  const results   = await Result.find({}, 'superstar');
+  const results   = await Result.find({}, 'joker superstar');
   for (const r of results) {
+    if (r.joker     != null) jokerFreq.set(r.joker,     (jokerFreq.get(r.joker)     || 0) + 1);
     if (r.superstar != null) superFreq.set(r.superstar, (superFreq.get(r.superstar) || 0) + 1);
   }
+  const topJokers = [...jokerFreq.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([n]) => n);
   const topSupers = [...superFreq.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([n]) => n);
 
   await AnalysisLog.create({
@@ -176,6 +182,7 @@ async function createAnalysisLog() {
     avgNumbersHit,
     bestEverHitScore:      bestEver,
     topNumbersSnapshot:    topNumbers,
+    topJokersSnapshot:     topJokers,
     topSuperstarsSnapshot: topSupers,
   });
 }

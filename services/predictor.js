@@ -45,16 +45,18 @@ export async function generateAndSavePrediction() {
   const weights = await ModelWeights.find();
   if (weights.length === 0) throw new Error('ModelWeights boş. Önce trainFromScratch çalıştırılmalı.');
 
-  const results = await Result.find({}, 'numbers superstar');
+  const results = await Result.find({}, 'numbers joker superstar');
 
   // Daha önce gerçek çekilişte çıkmış kombinasyonları dışla
   const existingCombos = new Set(
     results.map(r => [...r.numbers].sort((a, b) => a - b).join(','))
   );
 
-  // Süperstar frekansı (bağımsız çekiliş)
+  // Joker ve süperstar frekansları (her ikisi de bağımsız çekilişler)
+  const jokerFreq = new Map();
   const superFreq = new Map();
   for (const r of results) {
+    if (r.joker     != null) jokerFreq.set(r.joker,     (jokerFreq.get(r.joker)     || 0) + 1);
     if (r.superstar != null) superFreq.set(r.superstar, (superFreq.get(r.superstar) || 0) + 1);
   }
 
@@ -101,10 +103,11 @@ export async function generateAndSavePrediction() {
       }
     }
 
-    // Joker = en büyük tahmin sayısı - 1 (son çekilen sayının bir eksiği)
-    const maxNum    = nums[nums.length - 1];
-    const joker     = maxNum === 1 ? 90 : maxNum - 1;
-    const superstar = superFreq.size > 0 ? weightedPickFrom(superFreq) : null;
+    // Joker: 6 ana sayı hariç kalan havuzdan bağımsız çekilir
+    const numsSet   = new Set(nums);
+    const jokerPool = new Map([...jokerFreq].filter(([n]) => !numsSet.has(n)));
+    const joker     = jokerPool.size > 0 ? weightedPickFrom(jokerPool) : null;
+    const superstar = superFreq.size  > 0 ? weightedPickFrom(superFreq) : null;
 
     predictions.push({ numbers: nums, joker, superstar });
   }
