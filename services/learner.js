@@ -10,6 +10,24 @@ function getDayOfWeek(dateStr) {
   return new Date(year, month - 1, day).getDay();
 }
 
+function determinePrizeCategory(numbersHit, jokerHit, superstarHit) {
+  if (numbersHit === 6 && superstarHit)            return '6+SüperStar bilen kişi sayısı';
+  if (numbersHit === 6)                             return '6 bilen kişi sayısı';
+  if (numbersHit === 5 && jokerHit && superstarHit) return '5+1+SüperStar bilen kişi sayısı';
+  if (numbersHit === 5 && jokerHit)                 return '5+1 bilen kişi sayısı';
+  if (numbersHit === 5 && superstarHit)             return '5+SüperStar bilen kişi sayısı';
+  if (numbersHit === 5)                             return '5 bilen kişi sayısı';
+  if (numbersHit === 4 && superstarHit)             return '4+SüperStar bilen kişi sayısı';
+  if (numbersHit === 4)                             return '4 bilen kişi sayısı';
+  if (numbersHit === 3 && superstarHit)             return '3+SüperStar bilen kişi sayısı';
+  if (numbersHit === 3)                             return '3 bilen kişi sayısı';
+  if (numbersHit === 2 && superstarHit)             return '2+SüperStar bilen kişi sayısı';
+  if (numbersHit === 2)                             return '2 bilen kişi sayısı';
+  if (numbersHit === 1 && superstarHit)             return '1+SüperStar bilen kişi sayısı';
+  if (superstarHit)                                 return '0+SüperStar bilen kişi sayısı';
+  return null;
+}
+
 // Bir sonraki çekiliş günü (Pazartesi=1, Çarşamba=3, Cumartesi=6)
 function getNextDrawDay() {
   const day = new Date().getDay();
@@ -106,13 +124,16 @@ export async function trainFromScratch() {
 
 async function evaluatePrediction(prediction, actualDraw) {
   const actualSet = new Set(actualDraw.numbers);
+  const prizeMap  = new Map((actualDraw.prizeTable || []).map(p => [p.category, p.prizeAmount]));
 
   const evaluationResults = prediction.predictions.map((pred, idx) => {
-    const numbersHit   = pred.numbers.filter(n => actualSet.has(n)).length;
-    const jokerHit     = actualDraw.joker     != null && pred.joker     === actualDraw.joker;
-    const superstarHit = actualDraw.superstar != null && pred.superstar === actualDraw.superstar;
+    const numbersHit    = pred.numbers.filter(n => actualSet.has(n)).length;
+    const jokerHit      = actualDraw.joker     != null && pred.joker     === actualDraw.joker;
+    const superstarHit  = actualDraw.superstar != null && pred.superstar === actualDraw.superstar;
     const totalHitScore = numbersHit + (jokerHit ? 1.5 : 0) + (superstarHit ? 2.0 : 0);
-    return { predictionIndex: idx, numbersHit, jokerHit, superstarHit, totalHitScore };
+    const prizeCategory = determinePrizeCategory(numbersHit, jokerHit, superstarHit);
+    const prizeAmount   = prizeCategory ? (prizeMap.get(prizeCategory) ?? null) : null;
+    return { predictionIndex: idx, numbersHit, jokerHit, superstarHit, totalHitScore, prizeCategory, prizeAmount };
   });
 
   const scores = evaluationResults.map(e => e.totalHitScore);
