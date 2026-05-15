@@ -45,11 +45,12 @@ export async function updateResults() {
       try {
         const details = await fetchDrawDetails(draw.id);
         const result  = await Result.create({
-          drawId:   draw.id,
-          drawDate: draw.date,
-          numbers:  details.numbers,
-          joker:    details.joker,
-          superstar:details.superstar,
+          drawId:     draw.id,
+          drawDate:   draw.date,
+          numbers:    details.numbers,
+          joker:      details.joker,
+          superstar:  details.superstar,
+          prizeTable: details.prizeTable,
         });
         savedResults.push(result);
         added++;
@@ -143,4 +144,45 @@ export async function getStats() {
     latestDraw: latest ? { drawId: latest.drawId, drawDate: latest.drawDate } : null,
     oldestDraw: oldest ? { drawId: oldest.drawId, drawDate: oldest.drawDate } : null,
   };
+}
+
+export async function getRecentResults() {
+  const recentDraws = await Result.find({}, 'drawId drawDate numbers joker superstar')
+    .sort({ drawId: -1 })
+    .limit(3);
+
+  const results = await Promise.all(recentDraws.map(async (draw) => {
+    const prediction = await Prediction.findOne(
+      { evaluatedAgainstDrawId: draw.drawId },
+      'predictions evaluationResults'
+    );
+
+    let evaluation = null;
+    if (prediction) {
+      evaluation = {
+        predictions: prediction.predictions.map((pred, i) => {
+          const er = (prediction.evaluationResults || []).find(e => e.predictionIndex === i) || {};
+          return {
+            index:         i,
+            numbers:       pred.numbers,
+            joker:         pred.joker,
+            superstar:     pred.superstar,
+            prizeCategory: er.prizeCategory ?? null,
+            prizeAmount:   er.prizeAmount   ?? null,
+          };
+        }),
+      };
+    }
+
+    return {
+      drawId:    draw.drawId,
+      drawDate:  draw.drawDate,
+      numbers:   draw.numbers,
+      joker:     draw.joker,
+      superstar: draw.superstar,
+      evaluation,
+    };
+  }));
+
+  return { results };
 }
