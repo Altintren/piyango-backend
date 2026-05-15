@@ -5,6 +5,7 @@ import {
   getPredictions,
   getPerformance,
   getStats,
+  getRecentResults,
 } from '../controllers/lotteryController.js';
 
 const router = Router();
@@ -31,8 +32,9 @@ router.get('/api/check', (req, res) => {
   res.json({ success: true, message: 'Kontrol başlatıldı.' });
   checkForNewDraw().catch(err => console.error('Check hatası:', err.message));
 });
-router.get('/api/predictions', wrap(getPredictions));
-router.get('/api/performance', wrap(getPerformance));
-router.get('/api/stats',       wrap(getStats));
+router.get('/api/predictions',    wrap(getPredictions));
+router.get('/api/performance',    wrap(getPerformance));
+router.get('/api/stats',          wrap(getStats));
+router.get('/api/results/recent', wrap(getRecentResults));
 
 export default router;
