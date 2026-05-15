@@ -19,7 +19,6 @@ async function fetchWithRetry(url, retries = 3) {
   }
 }
 
-// Tüm çekiliş listesini döndürür: [{ id: Number, date: String }]
 export async function fetchDrawList() {
   const html = await fetchWithRetry(`${BASE_URL}/`);
   const $ = cheerio.load(html);
@@ -38,7 +37,6 @@ export async function fetchDrawList() {
   return draws;
 }
 
-// Tek çekiliş detayını döndürür
 export async function fetchDrawDetails(drawId) {
   await sleep(800);
   const html = await fetchWithRetry(`${BASE_URL}/${drawId}`);
@@ -54,9 +52,26 @@ export async function fetchDrawDetails(drawId) {
     throw new Error(`Geçersiz numara sayısı: ${allNums.length} (drawId: ${drawId})`);
   }
 
+  const prizeTable = [];
+  $('.lottery-wins-money-item').each((_, el) => {
+    const spans = $(el).find('span');
+    if (spans.length < 2) return;
+
+    const categoryRaw  = $(spans[0]).clone().find('strong').remove().end().text().trim();
+    const category     = categoryRaw.replace(/\s+/g, ' ').replace(/:$/, '').trim();
+    const winnersText  = $(spans[0]).find('strong').text().trim().replace(/\./g, '');
+    const winnersCount = isNaN(Number(winnersText)) ? 0 : Number(winnersText);
+    const prizeAmount  = $(spans[1]).find('strong').text().trim();
+
+    if (category && prizeAmount) {
+      prizeTable.push({ category, winnersCount, prizeAmount });
+    }
+  });
+
   return {
-    numbers:   allNums.slice(0, 6),
-    joker:     allNums.length >= 7 ? allNums[6] : null,
-    superstar: allNums.length >= 8 ? allNums[7] : null,
+    numbers:    allNums.slice(0, 6),
+    joker:      allNums.length >= 7 ? allNums[6] : null,
+    superstar:  allNums.length >= 8 ? allNums[7] : null,
+    prizeTable,
   };
 }
