@@ -6,6 +6,8 @@ const evaluationResultSchema = new mongoose.Schema({
   jokerHit:        Boolean,
   superstarHit:    Boolean,
   totalHitScore:   Number,
+  prizeCategory:   { type: String, default: null },
+  prizeAmount:     { type: String, default: null },
 }, { _id: false });
 
 const predictionSchema = new mongoose.Schema({
