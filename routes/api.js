@@ -6,6 +6,7 @@ import {
   getPerformance,
   getStats,
   getRecentResults,
+  getUpdateStatus,
 } from '../controllers/lotteryController.js';
 
 const router = Router();
@@ -21,13 +22,14 @@ const wrap = fn => async (req, res) => {
 };
 
 router.get('/api/update', (req, res) => {
-  res.json({ success: true, message: 'Güncelleme arka planda başlatıldı. /api/stats ile takip edebilirsin.' });
+  res.json({ success: true });
   updateResults().then(r => {
     console.log(`Güncelleme tamamlandı: ${r.added} yeni, ${r.skipped} atlandı`);
   }).catch(err => {
     console.error('Güncelleme hatası:', err.message);
   });
 });
+router.get('/api/update/status', (req, res) => res.json(getUpdateStatus()));
 router.get('/api/check', (req, res) => {
   res.json({ success: true, message: 'Kontrol başlatıldı.' });
   checkForNewDraw().catch(err => console.error('Check hatası:', err.message));

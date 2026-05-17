@@ -5,10 +5,14 @@ import { fetchDrawList, fetchDrawDetails } from '../services/scraper.js';
 import { trainFromScratch, learnFromNewDraw } from '../services/learner.js';
 import { generateAndSavePrediction } from '../services/predictor.js';
 
-let isUpdating = false;
+let updateStatus = { running: false, message: 'Boşta', startedAt: null };
+
+export function getUpdateStatus() {
+  return { ...updateStatus };
+}
 
 export async function checkForNewDraw() {
-  if (isUpdating) return { skipped: true, reason: 'Güncelleme zaten devam ediyor.' };
+  if (updateStatus.running) return { skipped: true, reason: 'Güncelleme zaten devam ediyor.' };
 
   const allDraws  = await fetchDrawList();
   const latestSite = allDraws.reduce((max, d) => d.id > max.id ? d : max, allDraws[0]);
@@ -25,23 +29,31 @@ export async function checkForNewDraw() {
 }
 
 export async function updateResults() {
-  if (isUpdating) throw new Error('Güncelleme zaten devam ediyor.');
-  isUpdating = true;
+  if (updateStatus.running) throw new Error('Güncelleme zaten devam ediyor.');
+  updateStatus = { running: true, message: 'Çekiliş listesi alınıyor...', startedAt: new Date() };
 
   try {
     const allDraws    = await fetchDrawList();
     const existingIds = new Set(await Result.distinct('drawId'));
     const newDraws    = allDraws
       .filter(d => !existingIds.has(d.id))
-      .sort((a, b) => a.id - b.id); // kronolojik sıra (eskiden yeniye)
+      .sort((a, b) => a.id - b.id);
 
     console.log(`Toplam: ${allDraws.length} | Yeni: ${newDraws.length}`);
+
+    if (newDraws.length === 0) {
+      updateStatus.message = 'Tamamlandı: Yeni çekiliş bulunamadı.';
+      return { added: 0, skipped: 0, total: allDraws.length };
+    }
+
+    updateStatus.message = `${newDraws.length} yeni çekiliş bulundu, detaylar alınıyor...`;
 
     let added   = 0;
     let skipped = 0;
     const savedResults = [];
 
     for (const draw of newDraws) {
+      updateStatus.message = `Çekiliş işleniyor: ${draw.date} (${added + skipped + 1}/${newDraws.length})`;
       try {
         const details = await fetchDrawDetails(draw.id);
         const result  = await Result.create({
@@ -65,15 +77,19 @@ export async function updateResults() {
       }
     }
 
-    // Yeni çekiliş varsa öğren — sadece en son çekiliş üzerinden
     if (savedResults.length > 0) {
+      updateStatus.message = 'Model güncelleniyor...';
       const latestResult = savedResults[savedResults.length - 1];
       await learnFromNewDraw(latestResult);
     }
 
+    updateStatus.message = `Tamamlandı: ${added} yeni çekiliş eklendi.`;
     return { added, skipped, total: allDraws.length };
+  } catch (err) {
+    updateStatus.message = `Hata: ${err.message}`;
+    throw err;
   } finally {
-    isUpdating = false;
+    updateStatus.running = false;
   }
 }
 
