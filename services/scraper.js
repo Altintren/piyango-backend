@@ -1,13 +1,19 @@
-import axios from 'axios';
 import * as cheerio from 'cheerio';
 
 const BASE_URL = 'https://www.fotomac.com.tr/sayisal-loto-sonuclari';
 
 const HEADERS = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-  'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-  'Accept-Language': 'tr-TR,tr;q=0.9,en;q=0.8',
+  'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+  'Accept-Language': 'tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7',
+  'Accept-Encoding': 'gzip, deflate, br',
   'Referer': 'https://www.fotomac.com.tr/',
+  'Cache-Control': 'no-cache',
+  'Pragma': 'no-cache',
+  'Sec-Fetch-Dest': 'document',
+  'Sec-Fetch-Mode': 'navigate',
+  'Sec-Fetch-Site': 'same-origin',
+  'Upgrade-Insecure-Requests': '1',
 };
 
 function sleep(ms) {
@@ -17,8 +23,9 @@ function sleep(ms) {
 async function fetchWithRetry(url, retries = 3) {
   for (let attempt = 0; attempt < retries; attempt++) {
     try {
-      const { data } = await axios.get(url, { timeout: 15000, headers: HEADERS });
-      return data;
+      const res = await fetch(url, { headers: HEADERS, signal: AbortSignal.timeout(15000) });
+      if (!res.ok) throw new Error(`Request failed with status code ${res.status}`);
+      return await res.text();
     } catch (err) {
       if (attempt === retries - 1) throw err;
       await sleep(1500 * (attempt + 1));
