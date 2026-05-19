@@ -3,6 +3,13 @@ import * as cheerio from 'cheerio';
 
 const BASE_URL = 'https://www.fotomac.com.tr/sayisal-loto-sonuclari';
 
+const HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+  'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+  'Accept-Language': 'tr-TR,tr;q=0.9,en;q=0.8',
+  'Referer': 'https://www.fotomac.com.tr/',
+};
+
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
@@ -10,7 +17,7 @@ function sleep(ms) {
 async function fetchWithRetry(url, retries = 3) {
   for (let attempt = 0; attempt < retries; attempt++) {
     try {
-      const { data } = await axios.get(url, { timeout: 15000 });
+      const { data } = await axios.get(url, { timeout: 15000, headers: HEADERS });
       return data;
     } catch (err) {
       if (attempt === retries - 1) throw err;
