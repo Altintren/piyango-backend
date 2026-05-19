@@ -1,27 +1,34 @@
+import axios from 'axios';
 import * as cheerio from 'cheerio';
-import { execFile } from 'child_process';
-import { promisify } from 'util';
 
-const execFileAsync = promisify(execFile);
 const BASE_URL = 'https://www.fotomac.com.tr/sayisal-loto-sonuclari';
+const SCRAPER_API_KEY = process.env.SCRAPER_API_KEY;
 
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+function buildUrl(targetUrl) {
+  if (SCRAPER_API_KEY) {
+    return `http://api.scraperapi.com?api_key=${SCRAPER_API_KEY}&url=${encodeURIComponent(targetUrl)}`;
+  }
+  return targetUrl;
+}
+
 async function fetchWithRetry(url, retries = 3) {
+  const requestUrl = buildUrl(url);
   for (let attempt = 0; attempt < retries; attempt++) {
     try {
-      const { stdout } = await execFileAsync('curl', [
-        '-sL',
-        '--max-time', '15',
-        '-H', 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-        '-H', 'Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        '-H', 'Accept-Language: tr-TR,tr;q=0.9,en;q=0.8',
-        '-H', 'Referer: https://www.fotomac.com.tr/',
-        url,
-      ], { maxBuffer: 10 * 1024 * 1024 });
-      return stdout;
+      const { data } = await axios.get(requestUrl, {
+        timeout: 30000,
+        headers: SCRAPER_API_KEY ? {} : {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'Accept-Language': 'tr-TR,tr;q=0.9,en;q=0.8',
+          'Referer': 'https://www.fotomac.com.tr/',
+        },
+      });
+      return data;
     } catch (err) {
       if (attempt === retries - 1) throw err;
       await sleep(1500 * (attempt + 1));
