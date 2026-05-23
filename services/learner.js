@@ -45,13 +45,16 @@ export async function trainFromScratch() {
   const recentStart = Math.max(0, total - 50);
   const recent      = results.slice(recentStart);
 
-  // Mevcut hitRate'leri koru
-  const existingWeights = await ModelWeights.find({}, 'number predictedCount hitCount');
+  // Mevcut ağırlıklı isabet skorlarını koru
+  const existingWeights = await ModelWeights.find({}, 'number predictedCount accumulatedHitScore');
   const hitRateMap = new Map(
-    existingWeights.map(w => [w.number, { predictedCount: w.predictedCount || 0, hitCount: w.hitCount || 0 }])
+    existingWeights.map(w => [w.number, {
+      predictedCount:      w.predictedCount      || 0,
+      accumulatedHitScore: w.accumulatedHitScore  || 0,
+    }])
   );
 
-  // Tek geçişte frekans hesapla
+  // Tek geçişte frekans hesapla — 6 ana sayı + joker (aynı havuzdan çekildiği için)
   const totalFreq    = new Map();
   const recentFreq   = new Map();
   const dayFreqByNum = new Map();
@@ -60,7 +63,8 @@ export async function trainFromScratch() {
   for (const r of results) {
     const day = String(getDayOfWeek(r.drawDate));
     dayDrawCount[day] = (dayDrawCount[day] || 0) + 1;
-    for (const n of r.numbers) {
+    const drawNums = r.joker != null ? [...r.numbers, r.joker] : [...r.numbers];
+    for (const n of drawNums) {
       totalFreq.set(n, (totalFreq.get(n) || 0) + 1);
       if (!dayFreqByNum.has(n)) dayFreqByNum.set(n, {});
       const dm = dayFreqByNum.get(n);
@@ -69,13 +73,16 @@ export async function trainFromScratch() {
   }
 
   for (const r of recent) {
-    for (const n of r.numbers) {
+    const drawNums = r.joker != null ? [...r.numbers, r.joker] : [...r.numbers];
+    for (const n of drawNums) {
       recentFreq.set(n, (recentFreq.get(n) || 0) + 1);
     }
   }
 
   const targetDay    = String(getNextDrawDay());
   const recentWindow = Math.min(50, total);
+  // Maksimum totalHitScore: 6 ana + 1.5 joker + 2.0 süperstar = 9.5
+  const MAX_SCORE    = 9.5;
 
   const bulkOps = [];
   for (const [number, totalApps] of totalFreq) {
@@ -88,9 +95,9 @@ export async function trainFromScratch() {
       ? (dayWeights[targetDay] || 0) / dayDrawCount[targetDay]
       : 0;
 
-    const existing = hitRateMap.get(number) || { predictedCount: 0, hitCount: 0 };
+    const existing = hitRateMap.get(number) || { predictedCount: 0, accumulatedHitScore: 0 };
     const hitRate  = existing.predictedCount > 0
-      ? existing.hitCount / existing.predictedCount
+      ? Math.min(existing.accumulatedHitScore / (existing.predictedCount * MAX_SCORE), 1)
       : 0;
 
     // score = baseFreq×0.30 + recentFreq×0.40 + dayFreq×0.20 + hitRate×0.10
@@ -127,8 +134,14 @@ async function evaluatePrediction(prediction, actualDraw) {
   const prizeMap  = new Map((actualDraw.prizeTable || []).map(p => [p.category, p.prizeAmount]));
 
   const evaluationResults = prediction.predictions.map((pred, idx) => {
-    const numbersHit    = pred.numbers.filter(n => actualSet.has(n)).length;
-    const jokerHit      = actualDraw.joker     != null && pred.joker     === actualDraw.joker;
+    const numbersHit = pred.numbers.filter(n => actualSet.has(n)).length;
+
+    // Geri uyumluluk: eski tahminlerde pred.joker açık olarak saklıydı.
+    // Yeni tahminlerde joker yok — draw.joker'ın 6 tahmin sayısı içinde olup olmadığına bakılır.
+    const jokerHit = pred.joker != null
+      ? pred.joker === actualDraw.joker
+      : (actualDraw.joker != null && pred.numbers.includes(actualDraw.joker));
+
     const superstarHit  = actualDraw.superstar != null && pred.superstar === actualDraw.superstar;
     const totalHitScore = numbersHit + (jokerHit ? 1.5 : 0) + (superstarHit ? 2.0 : 0);
     const prizeCategory = determinePrizeCategory(numbersHit, jokerHit, superstarHit);
@@ -147,23 +160,25 @@ async function evaluatePrediction(prediction, actualDraw) {
     averageHitScore:         scores.reduce((a, b) => a + b, 0) / scores.length,
   });
 
-  // Her tahmin edilen sayı için isabet takibini güncelle
+  // Her tahmin edilen sayı için ağırlıklı isabet skoru biriktir
   const hitTracker = new Map();
-  for (const pred of prediction.predictions) {
+  for (let i = 0; i < prediction.predictions.length; i++) {
+    const pred  = prediction.predictions[i];
+    const score = evaluationResults[i].totalHitScore;
     for (const n of pred.numbers) {
-      const cur = hitTracker.get(n) || { predicted: 0, hits: 0 };
-      cur.predicted += 1;
-      if (actualSet.has(n)) cur.hits += 1;
+      const cur = hitTracker.get(n) || { predicted: 0, accumulatedScore: 0 };
+      cur.predicted       += 1;
+      cur.accumulatedScore += score;
       hitTracker.set(n, cur);
     }
   }
 
   const hitOps = [];
-  for (const [number, { predicted, hits }] of hitTracker) {
+  for (const [number, { predicted, accumulatedScore }] of hitTracker) {
     hitOps.push({
       updateOne: {
         filter: { number },
-        update: { $inc: { predictedCount: predicted, hitCount: hits } },
+        update: { $inc: { predictedCount: predicted, accumulatedHitScore: accumulatedScore } },
         upsert: true,
       },
     });

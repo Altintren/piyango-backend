@@ -8,8 +8,8 @@ const modelWeightsSchema = new mongoose.Schema({
   recentAppearances: { type: Number, default: 0 },
   dayWeights:        { type: Object, default: {} },
   dayDrawCounts:     { type: Object, default: {} },
-  predictedCount:    { type: Number, default: 0 },
-  hitCount:          { type: Number, default: 0 },
+  predictedCount:       { type: Number, default: 0 },
+  accumulatedHitScore:  { type: Number, default: 0 },
 });
 
 export default mongoose.model('ModelWeights', modelWeightsSchema);

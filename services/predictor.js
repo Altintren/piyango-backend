@@ -45,18 +45,16 @@ export async function generateAndSavePrediction() {
   const weights = await ModelWeights.find();
   if (weights.length === 0) throw new Error('ModelWeights boş. Önce trainFromScratch çalıştırılmalı.');
 
-  const results = await Result.find({}, 'numbers joker superstar');
+  const results = await Result.find({}, 'numbers superstar');
 
   // Daha önce gerçek çekilişte çıkmış kombinasyonları dışla
   const existingCombos = new Set(
     results.map(r => [...r.numbers].sort((a, b) => a - b).join(','))
   );
 
-  // Joker ve süperstar frekansları (her ikisi de bağımsız çekilişler)
-  const jokerFreq = new Map();
+  // Süperstar frekansı (bağımsız tamburdan çekilir)
   const superFreq = new Map();
   for (const r of results) {
-    if (r.joker     != null) jokerFreq.set(r.joker,     (jokerFreq.get(r.joker)     || 0) + 1);
     if (r.superstar != null) superFreq.set(r.superstar, (superFreq.get(r.superstar) || 0) + 1);
   }
 
@@ -103,18 +101,16 @@ export async function generateAndSavePrediction() {
       }
     }
 
-    // Joker: 6 ana sayı hariç kalan havuzdan bağımsız çekilir
-    const numsSet   = new Set(nums);
-    const jokerPool = new Map([...jokerFreq].filter(([n]) => !numsSet.has(n)));
-    const joker     = jokerPool.size > 0 ? weightedPickFrom(jokerPool) : null;
-    const superstar = superFreq.size  > 0 ? weightedPickFrom(superFreq) : null;
+    // Joker tahmin edilmez — çekiliş sonucu joker sayısı bizim 6 tahminimiz içinde mi diye kontrol edilir.
+    // Süperstar: bağımsız tamburdan frekansa göre seçilir.
+    const superstar = superFreq.size > 0 ? weightedPickFrom(superFreq) : null;
 
-    predictions.push({ numbers: nums, joker, superstar });
+    predictions.push({ numbers: nums, joker: null, superstar });
   }
 
   // Model güveni: tahmin edilen sayıların ortalama skoru
-  const scoreMap       = new Map(weights.map(w => [w.number, w.score]));
-  const allPredNums    = predictions.flatMap(p => p.numbers);
+  const scoreMap        = new Map(weights.map(w => [w.number, w.score]));
+  const allPredNums     = predictions.flatMap(p => p.numbers);
   const modelConfidence = allPredNums.reduce((s, n) => s + (scoreMap.get(n) || 0), 0) / allPredNums.length;
 
   const prediction = await Prediction.create({
