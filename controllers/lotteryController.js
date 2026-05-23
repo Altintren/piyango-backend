@@ -3,7 +3,7 @@ import Prediction from '../models/Prediction.js';
 import ModelWeights from '../models/ModelWeights.js';
 import AnalysisLog from '../models/AnalysisLog.js';
 import { fetchDrawList, fetchDrawDetails } from '../services/scraper.js';
-import { trainFromScratch, learnFromNewDraw } from '../services/learner.js';
+import { trainFromScratch, learnFromNewDraw, backfillAnalysisLogs } from '../services/learner.js';
 import { generateAndSavePrediction } from '../services/predictor.js';
 
 let updateStatus = { running: false, message: 'Boşta', startedAt: null };
@@ -202,6 +202,10 @@ export async function getRecentResults() {
   }));
 
   return { results };
+}
+
+export async function runBackfill() {
+  return backfillAnalysisLogs();
 }
 
 export async function getComponentAnalysis() {

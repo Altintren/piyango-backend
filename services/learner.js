@@ -331,6 +331,79 @@ async function createAnalysisLog(latestResult) {
   });
 }
 
+// Geçmiş çekilişler için tek seferlik bileşen analizi.
+// Zaten log varsa es geçer (idempotent).
+export async function backfillAnalysisLogs() {
+  const existingCount = await AnalysisLog.countDocuments({ 'componentPerformance.baseFreq': { $exists: true } });
+  if (existingCount > 0) {
+    return { skipped: true, reason: `${existingCount} bileşen logu zaten mevcut.` };
+  }
+
+  const draws = await Result.find({}, 'drawId drawDate numbers joker')
+    .sort({ drawId: -1 })
+    .limit(30);
+
+  if (draws.length === 0) return { created: 0 };
+
+  const allWeights = await ModelWeights.find(
+    {}, 'number totalAppearances totalDraws recentAppearances dayWeights dayDrawCounts'
+  );
+  if (allWeights.length === 0) return { created: 0 };
+
+  const numCount    = allWeights.length;
+  const orderedDraws = [...draws].reverse(); // eskiden yeniye
+  const batchLogs   = [];
+  let created       = 0;
+
+  for (const draw of orderedDraws) {
+    const dayOfDraw = String(getDayOfWeek(draw.drawDate));
+
+    const compVals = allWeights.map(w => {
+      const n        = w.totalDraws || 1;
+      const rw       = Math.min(50, n);
+      const dayCount = (w.dayDrawCounts || {})[dayOfDraw] || 0;
+      return {
+        number:     w.number,
+        baseFreq:   w.totalAppearances / n,
+        recentFreq: rw > 0 ? w.recentAppearances / rw : 0,
+        dayFreq:    dayCount > 0 ? ((w.dayWeights || {})[dayOfDraw] || 0) / dayCount : 0,
+      };
+    });
+
+    const byBase   = [...compVals].sort((a, b) => b.baseFreq   - a.baseFreq);
+    const byRecent = [...compVals].sort((a, b) => b.recentFreq - a.recentFreq);
+    const byDay    = [...compVals].sort((a, b) => b.dayFreq    - a.dayFreq);
+
+    const rankBase   = new Map(byBase.map((v, i)   => [v.number, i]));
+    const rankRecent = new Map(byRecent.map((v, i) => [v.number, i]));
+    const rankDay    = new Map(byDay.map((v, i)    => [v.number, i]));
+
+    const pct = (rankMap, num) => {
+      const r = rankMap.get(num);
+      return r != null ? 1 - r / numCount : 0.5;
+    };
+
+    const drawnNums = draw.joker != null
+      ? [...draw.numbers, draw.joker]
+      : [...draw.numbers];
+
+    const componentPerformance = {
+      baseFreq:   { avgPercentile: arrayAvg(drawnNums.map(n => pct(rankBase,   n))) },
+      recentFreq: { avgPercentile: arrayAvg(drawnNums.map(n => pct(rankRecent, n))) },
+      dayFreq:    { avgPercentile: arrayAvg(drawnNums.map(n => pct(rankDay,    n))) },
+    };
+
+    const dynamicWeights = computeDynamicWeights([...batchLogs, { componentPerformance }]);
+
+    await AnalysisLog.create({ componentPerformance, dynamicWeights });
+    batchLogs.push({ componentPerformance });
+    created++;
+  }
+
+  console.log(`Backfill tamamlandı: ${created} analiz logu oluşturuldu.`);
+  return { created };
+}
+
 export async function learnFromNewDraw(newResult) {
   try {
     // 1. Bekleyen tahmini değerlendir

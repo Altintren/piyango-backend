@@ -8,6 +8,7 @@ import {
   getRecentResults,
   getUpdateStatus,
   getComponentAnalysis,
+  runBackfill,
 } from '../controllers/lotteryController.js';
 
 const router = Router();
@@ -40,5 +41,6 @@ router.get('/api/performance',    wrap(getPerformance));
 router.get('/api/stats',          wrap(getStats));
 router.get('/api/results/recent',    wrap(getRecentResults));
 router.get('/api/analysis',          wrap(getComponentAnalysis));
+router.get('/api/analyze/backfill',  wrap(runBackfill));
 
 export default router;
