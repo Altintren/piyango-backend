@@ -31,10 +31,48 @@ function determinePrizeCategory(numbersHit, jokerHit, superstarHit) {
 // Bir sonraki çekiliş günü (Pazartesi=1, Çarşamba=3, Cumartesi=6)
 function getNextDrawDay() {
   const day = new Date().getDay();
-  if (day === 0)              return 1; // Pazar     → Pazartesi
-  if (day === 1 || day === 2) return 3; // Pzt/Sal   → Çarşamba
-  if (day >= 3 && day <= 5)  return 6; // Çar/Per/Cum → Cumartesi
-  return 1;                             // Cumartesi → Pazartesi
+  if (day === 0)              return 1;
+  if (day === 1 || day === 2) return 3;
+  if (day >= 3 && day <= 5)  return 6;
+  return 1;
+}
+
+function arrayAvg(arr) {
+  return arr.length > 0 ? arr.reduce((s, v) => s + v, 0) / arr.length : 0;
+}
+
+// Son component performans loglarından dinamik ağırlık hesaplar.
+// Rastgele baseline 0.5 — bir bileşenin ortalaması 0.5'in üstündeyse tahmin gücü var demektir.
+function computeDynamicWeights(logs) {
+  const DEFAULT = { baseFreq: 0.30, recentFreq: 0.40, dayFreq: 0.20, hitRate: 0.10 };
+  const valid = logs.filter(l => l.componentPerformance?.baseFreq != null);
+  if (valid.length < 5) return DEFAULT;
+
+  const avgBase   = arrayAvg(valid.map(l => l.componentPerformance.baseFreq.avgPercentile));
+  const avgRecent = arrayAvg(valid.map(l => l.componentPerformance.recentFreq.avgPercentile));
+  const avgDay    = arrayAvg(valid.map(l => l.componentPerformance.dayFreq.avgPercentile));
+
+  // Rastgele baseline (0.5) üzerindeki fazlalık = gerçek tahmin gücü
+  const perfBase   = Math.max(avgBase   - 0.5, 0.001);
+  const perfRecent = Math.max(avgRecent - 0.5, 0.001);
+  const perfDay    = Math.max(avgDay    - 0.5, 0.001);
+
+  const totalPerf  = perfBase + perfRecent + perfDay;
+  const FREQ_TOTAL = 0.90;
+  const clamp      = v => Math.max(0.05, Math.min(0.70, v));
+
+  let wBase   = clamp((perfBase   / totalPerf) * FREQ_TOTAL);
+  let wRecent = clamp((perfRecent / totalPerf) * FREQ_TOTAL);
+  let wDay    = clamp((perfDay    / totalPerf) * FREQ_TOTAL);
+
+  // Clamp sonrası toplamı yeniden normalize et
+  const sum = wBase + wRecent + wDay;
+  wBase   = (wBase   / sum) * FREQ_TOTAL;
+  wRecent = (wRecent / sum) * FREQ_TOTAL;
+  wDay    = (wDay    / sum) * FREQ_TOTAL;
+
+  const r3 = v => Math.round(v * 1000) / 1000;
+  return { baseFreq: r3(wBase), recentFreq: r3(wRecent), dayFreq: r3(wDay), hitRate: 0.10 };
 }
 
 export async function trainFromScratch() {
@@ -45,7 +83,6 @@ export async function trainFromScratch() {
   const recentStart = Math.max(0, total - 50);
   const recent      = results.slice(recentStart);
 
-  // Mevcut ağırlıklı isabet skorlarını koru
   const existingWeights = await ModelWeights.find({}, 'number predictedCount accumulatedHitScore');
   const hitRateMap = new Map(
     existingWeights.map(w => [w.number, {
@@ -54,7 +91,7 @@ export async function trainFromScratch() {
     }])
   );
 
-  // Tek geçişte frekans hesapla — 6 ana sayı + joker (aynı havuzdan çekildiği için)
+  // 6 ana sayı + joker (aynı havuzdan çekildiği için) frekans hesabına dahil
   const totalFreq    = new Map();
   const recentFreq   = new Map();
   const dayFreqByNum = new Map();
@@ -79,19 +116,24 @@ export async function trainFromScratch() {
     }
   }
 
+  // Son AnalysisLog'dan dinamik ağırlıkları oku
+  const latestLog = await AnalysisLog.findOne(
+    { dynamicWeights: { $exists: true } }, 'dynamicWeights'
+  ).sort({ runAt: -1 });
+  const W = latestLog?.dynamicWeights || { baseFreq: 0.30, recentFreq: 0.40, dayFreq: 0.20, hitRate: 0.10 };
+
   const targetDay    = String(getNextDrawDay());
   const recentWindow = Math.min(50, total);
-  // Maksimum totalHitScore: 6 ana + 1.5 joker + 2.0 süperstar = 9.5
   const MAX_SCORE    = 9.5;
 
   const bulkOps = [];
   for (const [number, totalApps] of totalFreq) {
-    const recentApps  = recentFreq.get(number) || 0;
-    const dayWeights  = dayFreqByNum.get(number) || {};
+    const recentApps = recentFreq.get(number) || 0;
+    const dayWeights = dayFreqByNum.get(number) || {};
 
-    const baseFreq    = totalApps / total;
-    const recentRate  = recentApps / recentWindow;
-    const dayRate     = dayDrawCount[targetDay] > 0
+    const baseFreq   = totalApps / total;
+    const recentRate = recentApps / recentWindow;
+    const dayRate    = dayDrawCount[targetDay] > 0
       ? (dayWeights[targetDay] || 0) / dayDrawCount[targetDay]
       : 0;
 
@@ -100,8 +142,7 @@ export async function trainFromScratch() {
       ? Math.min(existing.accumulatedHitScore / (existing.predictedCount * MAX_SCORE), 1)
       : 0;
 
-    // score = baseFreq×0.30 + recentFreq×0.40 + dayFreq×0.20 + hitRate×0.10
-    const score = (baseFreq * 0.30) + (recentRate * 0.40) + (dayRate * 0.20) + (hitRate * 0.10);
+    const score = (baseFreq * W.baseFreq) + (recentRate * W.recentFreq) + (dayRate * W.dayFreq) + (hitRate * W.hitRate);
 
     bulkOps.push({
       updateOne: {
@@ -122,11 +163,9 @@ export async function trainFromScratch() {
     });
   }
 
-  if (bulkOps.length > 0) {
-    await ModelWeights.bulkWrite(bulkOps);
-  }
+  if (bulkOps.length > 0) await ModelWeights.bulkWrite(bulkOps);
 
-  console.log(`Model eğitildi: ${bulkOps.length} sayı, ${total} çekiliş üzerinden.`);
+  console.log(`Model eğitildi: ${bulkOps.length} sayı, ${total} çekiliş | Ağırlıklar: base=${W.baseFreq} recent=${W.recentFreq} day=${W.dayFreq} hit=${W.hitRate}`);
 }
 
 async function evaluatePrediction(prediction, actualDraw) {
@@ -136,8 +175,6 @@ async function evaluatePrediction(prediction, actualDraw) {
   const evaluationResults = prediction.predictions.map((pred, idx) => {
     const numbersHit = pred.numbers.filter(n => actualSet.has(n)).length;
 
-    // Geri uyumluluk: eski tahminlerde pred.joker açık olarak saklıydı.
-    // Yeni tahminlerde joker yok — draw.joker'ın 6 tahmin sayısı içinde olup olmadığına bakılır.
     const jokerHit = pred.joker != null
       ? pred.joker === actualDraw.joker
       : (actualDraw.joker != null && pred.numbers.includes(actualDraw.joker));
@@ -160,14 +197,13 @@ async function evaluatePrediction(prediction, actualDraw) {
     averageHitScore:         scores.reduce((a, b) => a + b, 0) / scores.length,
   });
 
-  // Her tahmin edilen sayı için ağırlıklı isabet skoru biriktir
   const hitTracker = new Map();
   for (let i = 0; i < prediction.predictions.length; i++) {
     const pred  = prediction.predictions[i];
     const score = evaluationResults[i].totalHitScore;
     for (const n of pred.numbers) {
       const cur = hitTracker.get(n) || { predicted: 0, accumulatedScore: 0 };
-      cur.predicted       += 1;
+      cur.predicted        += 1;
       cur.accumulatedScore += score;
       hitTracker.set(n, cur);
     }
@@ -188,20 +224,20 @@ async function evaluatePrediction(prediction, actualDraw) {
   console.log(`Tahmin değerlendirildi. En iyi skor: ${Math.max(...scores)}`);
 }
 
-async function createAnalysisLog() {
-  const total     = await Result.countDocuments();
+// latestResult: çekiliş sonucu — component analizi için hangi sayıların çıktığını bilmek gerekiyor
+async function createAnalysisLog(latestResult) {
+  const drawCount = await Result.countDocuments();
   const evaluated = await Prediction.find({ status: 'evaluated' }, 'evaluationResults bestHitScore');
 
   const allHitScores  = evaluated.flatMap(p => (p.evaluationResults || []).map(e => e.totalHitScore));
   const allNumHits    = evaluated.flatMap(p => (p.evaluationResults || []).map(e => e.numbersHit));
-  const avgHitScore   = allHitScores.length  > 0 ? allHitScores.reduce((a, b) => a + b, 0)  / allHitScores.length  : 0;
-  const avgNumbersHit = allNumHits.length    > 0 ? allNumHits.reduce((a, b) => a + b, 0)    / allNumHits.length    : 0;
-  const bestEver      = evaluated.length     > 0 ? Math.max(...evaluated.map(p => p.bestHitScore || 0)) : 0;
+  const avgHitScore   = allHitScores.length > 0 ? arrayAvg(allHitScores) : 0;
+  const avgNumbersHit = allNumHits.length   > 0 ? arrayAvg(allNumHits)   : 0;
+  const bestEver      = evaluated.length    > 0 ? Math.max(...evaluated.map(p => p.bestHitScore || 0)) : 0;
 
-  const topWeights    = await ModelWeights.find().sort({ score: -1 }).limit(10);
-  const topNumbers    = topWeights.map(w => w.number);
+  const topWeights = await ModelWeights.find().sort({ score: -1 }).limit(10);
+  const topNumbers = topWeights.map(w => w.number);
 
-  // Joker ve süperstar frekansları
   const jokerFreq = new Map();
   const superFreq = new Map();
   const results   = await Result.find({}, 'joker superstar');
@@ -212,14 +248,86 @@ async function createAnalysisLog() {
   const topJokers = [...jokerFreq.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([n]) => n);
   const topSupers = [...superFreq.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([n]) => n);
 
+  // ── Component performans analizi ──────────────────────────────────────────
+  // Her bileşen için: çıkan sayılar o bileşenin sıralamasında ortalama kaçıncı yüzdelikte?
+  // 1.0 = hepsi en üstte, 0.5 = rastgele beklenti, 0.0 = hepsi en altta
+  let componentPerformance = null;
+  let dynamicWeights       = { baseFreq: 0.30, recentFreq: 0.40, dayFreq: 0.20, hitRate: 0.10 };
+
+  if (latestResult) {
+    const allWeights = await ModelWeights.find(
+      {}, 'number totalAppearances totalDraws recentAppearances dayWeights dayDrawCounts'
+    );
+
+    if (allWeights.length > 0) {
+      const dayOfDraw = String(getDayOfWeek(latestResult.drawDate));
+      const numCount  = allWeights.length;
+
+      const compVals = allWeights.map(w => {
+        const n         = w.totalDraws || 1;
+        const rw        = Math.min(50, n);
+        const dayCount  = (w.dayDrawCounts || {})[dayOfDraw] || 0;
+        return {
+          number:     w.number,
+          baseFreq:   w.totalAppearances / n,
+          recentFreq: rw > 0 ? w.recentAppearances / rw : 0,
+          dayFreq:    dayCount > 0 ? ((w.dayWeights || {})[dayOfDraw] || 0) / dayCount : 0,
+        };
+      });
+
+      // Her bileşen için büyükten küçüğe sırala → rank 0 en yüksek değer
+      const byBase   = [...compVals].sort((a, b) => b.baseFreq   - a.baseFreq);
+      const byRecent = [...compVals].sort((a, b) => b.recentFreq - a.recentFreq);
+      const byDay    = [...compVals].sort((a, b) => b.dayFreq    - a.dayFreq);
+
+      const rankBase   = new Map(byBase.map((v, i)   => [v.number, i]));
+      const rankRecent = new Map(byRecent.map((v, i) => [v.number, i]));
+      const rankDay    = new Map(byDay.map((v, i)    => [v.number, i]));
+
+      // Percentile: rank 0 → 1.0 (en iyi), rank (n-1) → ~0.0
+      const pct = (rankMap, num) => {
+        const r = rankMap.get(num);
+        return r != null ? 1 - r / numCount : 0.5;
+      };
+
+      // Çekiliş sonucu: 6 ana sayı + joker (aynı havuzdan)
+      const drawnNums = latestResult.joker != null
+        ? [...latestResult.numbers, latestResult.joker]
+        : [...latestResult.numbers];
+
+      componentPerformance = {
+        baseFreq:   { avgPercentile: arrayAvg(drawnNums.map(n => pct(rankBase,   n))) },
+        recentFreq: { avgPercentile: arrayAvg(drawnNums.map(n => pct(rankRecent, n))) },
+        dayFreq:    { avgPercentile: arrayAvg(drawnNums.map(n => pct(rankDay,    n))) },
+      };
+
+      // Son 29 log + mevcut analiz = max 30 örnek üzerinden dinamik ağırlık hesapla
+      const recentLogs = await AnalysisLog.find(
+        { 'componentPerformance.baseFreq': { $exists: true } },
+        'componentPerformance'
+      ).sort({ runAt: -1 }).limit(29);
+
+      dynamicWeights = computeDynamicWeights([...recentLogs, { componentPerformance }]);
+
+      console.log(
+        `Bileşen analizi | base: ${componentPerformance.baseFreq.avgPercentile.toFixed(3)} ` +
+        `recent: ${componentPerformance.recentFreq.avgPercentile.toFixed(3)} ` +
+        `day: ${componentPerformance.dayFreq.avgPercentile.toFixed(3)} ` +
+        `→ Yeni ağırlıklar: ${JSON.stringify(dynamicWeights)}`
+      );
+    }
+  }
+
   await AnalysisLog.create({
-    totalDrawsInDB:        total,
+    totalDrawsInDB:        drawCount,
     avgHitScore,
     avgNumbersHit,
     bestEverHitScore:      bestEver,
     topNumbersSnapshot:    topNumbers,
     topJokersSnapshot:     topJokers,
     topSuperstarsSnapshot: topSupers,
+    componentPerformance,
+    dynamicWeights,
   });
 }
 
@@ -227,15 +335,13 @@ export async function learnFromNewDraw(newResult) {
   try {
     // 1. Bekleyen tahmini değerlendir
     const pending = await Prediction.findOne({ status: 'pending' }).sort({ createdAt: -1 });
-    if (pending) {
-      await evaluatePrediction(pending, newResult);
-    }
+    if (pending) await evaluatePrediction(pending, newResult);
 
-    // 2. Modeli yeniden eğit
+    // 2. Bileşen analizi yap ve dinamik ağırlıkları kaydet (eğitim ÖNCE yapılmalı ki yeni ağırlıklar kullanılsın)
+    await createAnalysisLog(newResult);
+
+    // 3. Modeli yeniden eğit (yeni dinamik ağırlıklarla)
     await trainFromScratch();
-
-    // 3. Analiz logu yaz
-    await createAnalysisLog();
 
     // 4. Yeni tahmin üret
     await generateAndSavePrediction();
