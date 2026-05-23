@@ -1,6 +1,7 @@
 import Result from '../models/Result.js';
 import Prediction from '../models/Prediction.js';
 import ModelWeights from '../models/ModelWeights.js';
+import AnalysisLog from '../models/AnalysisLog.js';
 import { fetchDrawList, fetchDrawDetails } from '../services/scraper.js';
 import { trainFromScratch, learnFromNewDraw } from '../services/learner.js';
 import { generateAndSavePrediction } from '../services/predictor.js';
@@ -201,4 +202,34 @@ export async function getRecentResults() {
   }));
 
   return { results };
+}
+
+export async function getComponentAnalysis() {
+  const logs = await AnalysisLog.find(
+    { 'componentPerformance.baseFreq': { $exists: true } },
+    'componentPerformance dynamicWeights'
+  ).sort({ runAt: -1 }).limit(30);
+
+  if (logs.length === 0) return { available: false };
+
+  const avg = arr => arr.reduce((s, v) => s + v, 0) / arr.length;
+
+  const avgBase   = avg(logs.map(l => l.componentPerformance.baseFreq.avgPercentile));
+  const avgRecent = avg(logs.map(l => l.componentPerformance.recentFreq.avgPercentile));
+  const avgDay    = avg(logs.map(l => l.componentPerformance.dayFreq.avgPercentile));
+
+  const r3 = v => Math.round(v * 1000) / 1000;
+  const latestWeights = logs[0].dynamicWeights
+    || { baseFreq: 0.30, recentFreq: 0.40, dayFreq: 0.20, hitRate: 0.10 };
+
+  return {
+    available: true,
+    logsUsed:  logs.length,
+    avgPercentiles: {
+      baseFreq:   r3(avgBase),
+      recentFreq: r3(avgRecent),
+      dayFreq:    r3(avgDay),
+    },
+    currentWeights: latestWeights,
+  };
 }

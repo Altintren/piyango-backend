@@ -7,6 +7,7 @@ import {
   getStats,
   getRecentResults,
   getUpdateStatus,
+  getComponentAnalysis,
 } from '../controllers/lotteryController.js';
 
 const router = Router();
@@ -37,6 +38,7 @@ router.get('/api/check', (req, res) => {
 router.get('/api/predictions',    wrap(getPredictions));
 router.get('/api/performance',    wrap(getPerformance));
 router.get('/api/stats',          wrap(getStats));
-router.get('/api/results/recent', wrap(getRecentResults));
+router.get('/api/results/recent',    wrap(getRecentResults));
+router.get('/api/analysis',          wrap(getComponentAnalysis));
 
 export default router;
