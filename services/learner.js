@@ -169,15 +169,22 @@ export async function trainFromScratch() {
 }
 
 async function evaluatePrediction(prediction, actualDraw) {
-  const actualSet = new Set(actualDraw.numbers);
-  const prizeMap  = new Map((actualDraw.prizeTable || []).map(p => [p.category, p.prizeAmount]));
+  // Sadece ilk 6 ana sayı — eski verilerde joker/süperstar numbers[]'e karışmış olabilir
+  const mainNumbers = (actualDraw.numbers || []).slice(0, 6);
+  const actualSet   = new Set(mainNumbers);
+  const prizeMap    = new Map((actualDraw.prizeTable || []).map(p => [p.category, p.prizeAmount]));
+
+  // Joker, süperstar ile aynıysa geçersiz say (scraper parse hatası koruması)
+  const drawnJoker = (actualDraw.joker != null && actualDraw.joker !== actualDraw.superstar)
+    ? actualDraw.joker
+    : null;
 
   const evaluationResults = prediction.predictions.map((pred, idx) => {
     const numbersHit = pred.numbers.filter(n => actualSet.has(n)).length;
 
     const jokerHit = pred.joker != null
-      ? pred.joker === actualDraw.joker
-      : (actualDraw.joker != null && pred.numbers.includes(actualDraw.joker));
+      ? pred.joker === drawnJoker
+      : (drawnJoker != null && pred.numbers.includes(drawnJoker));
 
     const superstarHit  = actualDraw.superstar != null && pred.superstar === actualDraw.superstar;
     const totalHitScore = numbersHit + (jokerHit ? 1.5 : 0) + (superstarHit ? 2.0 : 0);
